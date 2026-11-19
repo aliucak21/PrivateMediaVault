@@ -1,4 +1,9 @@
-const { withAndroidManifest, withMainActivity, withDangerousMod } = require('@expo/config-plugins');
+const {
+  withAndroidManifest,
+  withAppBuildGradle,
+  withMainActivity,
+  withDangerousMod,
+} = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -95,6 +100,19 @@ function withWhatsAppShare(config) {
       });
     }
 
+    return config;
+  });
+
+  // 1b. release APK'nın her zaman debug keystore ile imzalanmasını garanti et
+  config = withAppBuildGradle(config, (config) => {
+    let contents = config.modResults.contents;
+    if (contents.includes('buildTypes {') && !contents.includes('signingConfig signingConfigs.debug')) {
+      contents = contents.replace(
+        /release\s*\{/,
+        'release {\n            signingConfig signingConfigs.debug'
+      );
+    }
+    config.modResults.contents = contents;
     return config;
   });
 
