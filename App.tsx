@@ -818,8 +818,10 @@ export default function App() {
                     <Text style={styles.secondaryActionTitle}>
                       Tüm Dosyalara Erişim: {allFilesOk ? `Açık (${autoDetectedFolders.length} klasör bulundu)` : 'Kapalı (Otomatik Bul)'}
                     </Text>
-                    <Text style={styles.secondaryActionSub}>
-                      Açıldığında WhatsApp Images/Video/Private klasörlerini kendisi otomatik bulur
+                    <Text style={styles.secondaryActionSub} numberOfLines={2}>
+                      {allFilesOk && autoDetectedFolders.length > 0
+                        ? autoDetectedFolders.map((u) => u.replace('file:///storage/emulated/0/', '')).join(' • ')
+                        : 'Açıldığında WhatsApp / Business / Çift Uygulama medya klasörlerini otomatik tarar'}
                     </Text>
                   </View>
                 </TouchableOpacity>

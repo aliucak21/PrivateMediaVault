@@ -418,23 +418,65 @@ class ShareIntentModule(private val reactContext: ReactApplicationContext) :
     @ReactMethod
     fun findWhatsAppMediaFolders(promise: Promise) {
         try {
-            val root = Environment.getExternalStorageDirectory()
-            val candidates = listOf(
-                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images",
-                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/Private",
-                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video",
-                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video/Private",
-                "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/WhatsApp Business Images",
-                "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/WhatsApp Business Video",
-                "WhatsApp/Media/WhatsApp Images",
-                "WhatsApp/Media/WhatsApp Video"
-            )
-            val found: WritableArray = Arguments.createArray()
-            for (rel in candidates) {
-                val dir = File(root, rel)
-                if (dir.exists() && dir.isDirectory && dir.canRead()) {
-                    found.pushString(Uri.fromFile(dir).toString())
+            val foundSet = linkedSetOf<String>()
+            val roots = mutableListOf<File>()
+            val primary = Environment.getExternalStorageDirectory()
+            roots.add(primary)
+
+            // Xiaomi Çift Uygulama (Dual Apps) profili (/storage/emulated/999)
+            val dualAppRoot = File("/storage/emulated/999")
+            if (dualAppRoot.exists() && dualAppRoot.canRead()) {
+                roots.add(dualAppRoot)
+            }
+
+            fun collectMediaSubfolders(mediaDir: File) {
+                if (!mediaDir.exists() || !mediaDir.isDirectory || !mediaDir.canRead()) return
+                val children = mediaDir.listFiles() ?: return
+                for (child in children) {
+                    if (!child.isDirectory || !child.canRead()) continue
+                    val name = child.name
+                    if (
+                        name.contains("Images", ignoreCase = true) ||
+                        name.contains("Video", ignoreCase = true)
+                    ) {
+                        foundSet.add(Uri.fromFile(child).toString())
+                        val privateSub = File(child, "Private")
+                        if (privateSub.exists() && privateSub.isDirectory && privateSub.canRead()) {
+                            foundSet.add(Uri.fromFile(privateSub).toString())
+                        }
+                    }
                 }
+            }
+
+            for (root in roots) {
+                // 1. Android/media/com.whatsapp* altını dinamik tara
+                val androidMedia = File(root, "Android/media")
+                if (androidMedia.exists() && androidMedia.isDirectory && androidMedia.canRead()) {
+                    val pkgs = androidMedia.listFiles() ?: emptyArray()
+                    for (pkgDir in pkgs) {
+                        if (!pkgDir.isDirectory || !pkgDir.name.contains("whatsapp", ignoreCase = true)) continue
+                        val subDirs = pkgDir.listFiles() ?: emptyArray()
+                        for (sub in subDirs) {
+                            if (sub.isDirectory) {
+                                collectMediaSubfolders(File(sub, "Media"))
+                            }
+                        }
+                        collectMediaSubfolders(File(pkgDir, "Media"))
+                    }
+                }
+
+                // 2. Doğrudan kök dizindeki WhatsApp* klasörlerini tara
+                val rootChildren = root.listFiles() ?: emptyArray()
+                for (child in rootChildren) {
+                    if (child.isDirectory && child.name.contains("whatsapp", ignoreCase = true)) {
+                        collectMediaSubfolders(File(child, "Media"))
+                    }
+                }
+            }
+
+            val found: WritableArray = Arguments.createArray()
+            for (uri in foundSet) {
+                found.pushString(uri)
             }
             promise.resolve(found)
         } catch (e: Exception) {
