@@ -59,9 +59,8 @@ jobs:
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
           APK_PATH="app/build/outputs/apk/release/app-release.apk"
-          if ! "$APKSIGNER" verify "$APK_PATH" >/dev/null 2>&1; then
-            "$APKSIGNER" sign --ks app/debug.keystore --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey "$APK_PATH"
-          fi
+          keytool -genkeypair -v -keystore release-custom.keystore -alias vaultkey -keyalg RSA -keysize 2048 -validity 10000 -storepass vault1234 -keypass vault1234 -dname "CN=PrivateMediaVault, OU=Mobile, O=AliUcak, L=Istanbul, C=TR"
+          "$APKSIGNER" sign --ks release-custom.keystore --ks-pass pass:vault1234 --key-pass pass:vault1234 --ks-key-alias vaultkey "$APK_PATH"
           "$APKSIGNER" verify --verbose "$APK_PATH"
 
       - name: Upload APK Artifact
