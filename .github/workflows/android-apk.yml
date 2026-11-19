@@ -55,12 +55,13 @@ jobs:
         env:
           EXPO_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
         run: |
+          keytool -genkeypair -v -keystore app/release.keystore -alias vaultkey -keyalg RSA -keysize 2048 -validity 10000 -storepass vault1234 -keypass vault1234 -dname "CN=PrivateMediaVault, OU=Mobile, O=AliUcak, L=Istanbul, C=TR"
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
           APK_PATH="app/build/outputs/apk/release/app-release.apk"
-          keytool -genkeypair -v -keystore release-custom.keystore -alias vaultkey -keyalg RSA -keysize 2048 -validity 10000 -storepass vault1234 -keypass vault1234 -dname "CN=PrivateMediaVault, OU=Mobile, O=AliUcak, L=Istanbul, C=TR"
-          "$APKSIGNER" sign --ks release-custom.keystore --ks-pass pass:vault1234 --key-pass pass:vault1234 --ks-key-alias vaultkey "$APK_PATH"
+          "$ZIPALIGN" -c -v 4 "$APK_PATH" >/dev/null
           "$APKSIGNER" verify --verbose "$APK_PATH"
 
       - name: Upload APK Artifact

@@ -1,8 +1,8 @@
 const {
-  withAndroidManifest,
-  withAppBuildGradle,
-  withMainActivity,
-  withDangerousMod,
+    withAndroidManifest,
+    withAppBuildGradle,
+    withMainActivity,
+    withDangerousMod,
 } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
@@ -15,124 +15,139 @@ const path = require('path');
  * 4. ShareIntentModule + NotificationBridge (Kotlin) dosyalarını Android projesine yazar.
  */
 function withWhatsAppShare(config) {
-  // 1. AndroidManifest düzenlemesi
-  config = withAndroidManifest(config, (config) => {
-    const manifest = config.modResults;
-    const application = manifest.manifest.application?.[0];
-    if (!application) return config;
+    // 1. AndroidManifest düzenlemesi
+    config = withAndroidManifest(config, (config) => {
+        const manifest = config.modResults;
+        const application = manifest.manifest.application?.[0];
+        if (!application) return config;
 
-    application.$['android:allowBackup'] = 'false';
+        application.$['android:allowBackup'] = 'false';
 
-    // Kişisel APK için WhatsApp klasörlerini otomatik bulabilme ve uygulama içi güncelleme izinleri
-    manifest.manifest['uses-permission'] = manifest.manifest['uses-permission'] || [];
-    for (const permName of [
-      'android.permission.MANAGE_EXTERNAL_STORAGE',
-      'android.permission.REQUEST_INSTALL_PACKAGES',
-    ]) {
-      const exists = manifest.manifest['uses-permission'].some(
-        (p) => p.$['android:name'] === permName
-      );
-      if (!exists) {
-        manifest.manifest['uses-permission'].push({
-          $: { 'android:name': permName },
-        });
-      }
-    }
+        // Kişisel APK için WhatsApp klasörlerini otomatik bulabilme ve uygulama içi güncelleme izinleri
+        manifest.manifest['uses-permission'] = manifest.manifest['uses-permission'] || [];
+        for (const permName of [
+            'android.permission.MANAGE_EXTERNAL_STORAGE',
+            'android.permission.REQUEST_INSTALL_PACKAGES',
+        ]) {
+            const exists = manifest.manifest['uses-permission'].some(
+                (p) => p.$['android:name'] === permName
+            );
+            if (!exists) {
+                manifest.manifest['uses-permission'].push({
+                    $: { 'android:name': permName },
+                });
+            }
+        }
 
-    const mainActivity = application.activity?.find(
-      (act) => act.$['android:name'] === '.MainActivity'
-    );
-
-    if (mainActivity) {
-      mainActivity.$['android:launchMode'] = 'singleTask';
-      mainActivity['intent-filter'] = mainActivity['intent-filter'] || [];
-
-      const hasShareFilter = mainActivity['intent-filter'].some((filter) =>
-        filter.action?.some((a) => a.$['android:name'] === 'android.intent.action.SEND')
-      );
-
-      if (!hasShareFilter) {
-        mainActivity['intent-filter'].push(
-          {
-            action: [{ $: { 'android:name': 'android.intent.action.SEND' } }],
-            category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-            data: [
-              { $: { 'android:mimeType': 'image/*' } },
-              { $: { 'android:mimeType': 'video/*' } },
-            ],
-          },
-          {
-            action: [{ $: { 'android:name': 'android.intent.action.SEND_MULTIPLE' } }],
-            category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-            data: [
-              { $: { 'android:mimeType': 'image/*' } },
-              { $: { 'android:mimeType': 'video/*' } },
-            ],
-          }
+        const mainActivity = application.activity?.find(
+            (act) => act.$['android:name'] === '.MainActivity'
         );
-      }
-    }
 
-    // NotificationListenerService kaydı
-    application.service = application.service || [];
-    const hasNotifService = application.service.some(
-      (s) => s.$['android:name'] === '.WhatsAppNotificationListener'
-    );
-    if (!hasNotifService) {
-      application.service.push({
-        $: {
-          'android:name': '.WhatsAppNotificationListener',
-          'android:label': 'Özel Medya Kasası Bildirim Dinleyici',
-          'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
-          'android:exported': 'true',
-        },
-        'intent-filter': [
-          {
-            action: [
-              {
+        if (mainActivity) {
+            mainActivity.$['android:launchMode'] = 'singleTask';
+            mainActivity['intent-filter'] = mainActivity['intent-filter'] || [];
+
+            const hasShareFilter = mainActivity['intent-filter'].some((filter) =>
+                filter.action?.some((a) => a.$['android:name'] === 'android.intent.action.SEND')
+            );
+
+            if (!hasShareFilter) {
+                mainActivity['intent-filter'].push(
+                    {
+                        action: [{ $: { 'android:name': 'android.intent.action.SEND' } }],
+                        category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+                        data: [
+                            { $: { 'android:mimeType': 'image/*' } },
+                            { $: { 'android:mimeType': 'video/*' } },
+                        ],
+                    },
+                    {
+                        action: [{ $: { 'android:name': 'android.intent.action.SEND_MULTIPLE' } }],
+                        category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+                        data: [
+                            { $: { 'android:mimeType': 'image/*' } },
+                            { $: { 'android:mimeType': 'video/*' } },
+                        ],
+                    }
+                );
+            }
+        }
+
+        // NotificationListenerService kaydı
+        application.service = application.service || [];
+        const hasNotifService = application.service.some(
+            (s) => s.$['android:name'] === '.WhatsAppNotificationListener'
+        );
+        if (!hasNotifService) {
+            application.service.push({
                 $: {
-                  'android:name': 'android.service.notification.NotificationListenerService',
+                    'android:name': '.WhatsAppNotificationListener',
+                    'android:label': 'Özel Medya Kasası Bildirim Dinleyici',
+                    'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
+                    'android:exported': 'true',
                 },
-              },
-            ],
-          },
-        ],
-      });
-    }
+                'intent-filter': [
+                    {
+                        action: [
+                            {
+                                $: {
+                                    'android:name': 'android.service.notification.NotificationListenerService',
+                                },
+                            },
+                        ],
+                    },
+                ],
+            });
+        }
 
-    return config;
-  });
+        return config;
+    });
 
-  // 1b. release APK'nın her zaman debug keystore ile imzalanmasını garanti et
-  config = withAppBuildGradle(config, (config) => {
-    let contents = config.modResults.contents;
-    // Yalnızca release bloğunun içinde signingConfig yoksa ekle (debug bloğundakiyle karışmasın)
-    contents = contents.replace(
-      /(buildTypes\s*\{[\s\S]*?release\s*\{)([\s\S]*?)(\})/,
-      (match, start, body, end) => {
-        if (body.includes('signingConfig')) return match;
-        return `${start}\n            signingConfig signingConfigs.debug${body}${end}`;
-      }
-    );
-    config.modResults.contents = contents;
-    return config;
-  });
+    // 1b. release APK'nın Gradle tarafından resmi release.keystore ile imzalanmasını garanti et
+    config = withAppBuildGradle(config, (config) => {
+        let contents = config.modResults.contents;
+        if (!contents.includes('releaseCustom')) {
+            contents = contents.replace(
+                /signingConfigs\s*\{/,
+                `signingConfigs {
+        releaseCustom {
+            storeFile file('release.keystore')
+            storePassword 'vault1234'
+            keyAlias 'vaultkey'
+            keyPassword 'vault1234'
+        }`
+            );
+        }
+        contents = contents.replace(
+            /(buildTypes\s*\{[\s\S]*?release\s*\{[\s\S]*?)signingConfig\s+signingConfigs\.\w+/,
+            '$1signingConfig signingConfigs.releaseCustom'
+        );
+        contents = contents.replace(
+            /(buildTypes\s*\{[\s\S]*?release\s*\{)([\s\S]*?)(\})/,
+            (match, start, body, end) => {
+                if (body.includes('signingConfig')) return match;
+                return `${start}\n            signingConfig signingConfigs.releaseCustom${body}${end}`;
+            }
+        );
+        config.modResults.contents = contents;
+        return config;
+    });
 
-  // 2. Kotlin Modülleri ve WhatsAppNotificationListener oluştur
-  config = withDangerousMod(config, [
-    'android',
-    async (config) => {
-      const packageName = config.android?.package || 'com.privatemediavault.app';
-      const packagePath = packageName.replace(/\./g, '/');
-      const targetDir = path.join(
-        config.modRequest.platformProjectRoot,
-        'app/src/main/java',
-        packagePath
-      );
+    // 2. Kotlin Modülleri ve WhatsAppNotificationListener oluştur
+    config = withDangerousMod(config, [
+        'android',
+        async (config) => {
+            const packageName = config.android?.package || 'com.privatemediavault.app';
+            const packagePath = packageName.replace(/\./g, '/');
+            const targetDir = path.join(
+                config.modRequest.platformProjectRoot,
+                'app/src/main/java',
+                packagePath
+            );
 
-      fs.mkdirSync(targetDir, { recursive: true });
+            fs.mkdirSync(targetDir, { recursive: true });
 
-      const listenerKt = `package ${packageName}
+            const listenerKt = `package ${packageName}
 
 import android.app.Notification
 import android.content.Context
@@ -207,9 +222,9 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 }
 `;
 
-      fs.writeFileSync(path.join(targetDir, 'WhatsAppNotificationListener.kt'), listenerKt, 'utf8');
+            fs.writeFileSync(path.join(targetDir, 'WhatsAppNotificationListener.kt'), listenerKt, 'utf8');
 
-      const moduleKt = `package ${packageName}
+            const moduleKt = `package ${packageName}
 
 import android.content.ComponentName
 import android.content.Intent
@@ -548,45 +563,45 @@ class ShareIntentPackage : ReactPackage {
 }
 `;
 
-      fs.writeFileSync(path.join(targetDir, 'ShareIntentModule.kt'), moduleKt, 'utf8');
+            fs.writeFileSync(path.join(targetDir, 'ShareIntentModule.kt'), moduleKt, 'utf8');
 
-      const mainAppPath = path.join(targetDir, 'MainApplication.kt');
-      if (fs.existsSync(mainAppPath)) {
-        let mainApp = fs.readFileSync(mainAppPath, 'utf8');
-        if (!mainApp.includes('ShareIntentPackage()')) {
-          mainApp = mainApp.replace(
-            'PackageList(this).packages.apply {',
-            'PackageList(this).packages.apply {\n              add(ShareIntentPackage())'
-          );
-          fs.writeFileSync(mainAppPath, mainApp, 'utf8');
+            const mainAppPath = path.join(targetDir, 'MainApplication.kt');
+            if (fs.existsSync(mainAppPath)) {
+                let mainApp = fs.readFileSync(mainAppPath, 'utf8');
+                if (!mainApp.includes('ShareIntentPackage()')) {
+                    mainApp = mainApp.replace(
+                        'PackageList(this).packages.apply {',
+                        'PackageList(this).packages.apply {\n              add(ShareIntentPackage())'
+                    );
+                    fs.writeFileSync(mainAppPath, mainApp, 'utf8');
+                }
+            }
+
+            return config;
+        },
+    ]);
+
+    // 3. MainActivity.kt içine onCreate / onNewIntent hook ekle
+    config = withMainActivity(config, (config) => {
+        let src = config.modResults.contents;
+
+        if (!src.includes('import android.content.Intent')) {
+            src = src.replace('import android.os.Bundle', 'import android.content.Intent\nimport android.os.Bundle');
         }
-      }
 
-      return config;
-    },
-  ]);
+        if (!src.includes('ShareIntentHolder.handleIntent')) {
+            src = src.replace(
+                'super.onCreate(null)',
+                'super.onCreate(null)\n    ShareIntentHolder.handleIntent(this, intent)'
+            );
+            if (!src.includes('ShareIntentHolder.handleIntent')) {
+                src = src.replace(
+                    'super.onCreate(savedInstanceState)',
+                    'super.onCreate(savedInstanceState)\n    ShareIntentHolder.handleIntent(this, intent)'
+                );
+            }
 
-  // 3. MainActivity.kt içine onCreate / onNewIntent hook ekle
-  config = withMainActivity(config, (config) => {
-    let src = config.modResults.contents;
-
-    if (!src.includes('import android.content.Intent')) {
-      src = src.replace('import android.os.Bundle', 'import android.content.Intent\nimport android.os.Bundle');
-    }
-
-    if (!src.includes('ShareIntentHolder.handleIntent')) {
-      src = src.replace(
-        'super.onCreate(null)',
-        'super.onCreate(null)\n    ShareIntentHolder.handleIntent(this, intent)'
-      );
-      if (!src.includes('ShareIntentHolder.handleIntent')) {
-        src = src.replace(
-          'super.onCreate(savedInstanceState)',
-          'super.onCreate(savedInstanceState)\n    ShareIntentHolder.handleIntent(this, intent)'
-        );
-      }
-
-      const onNewIntentBlock = `
+            const onNewIntentBlock = `
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
@@ -597,15 +612,15 @@ class ShareIntentPackage : ReactPackage {
     }
   }
 `;
-      const lastBrace = src.lastIndexOf('}');
-      src = src.slice(0, lastBrace) + onNewIntentBlock + '\n}';
-    }
+            const lastBrace = src.lastIndexOf('}');
+            src = src.slice(0, lastBrace) + onNewIntentBlock + '\n}';
+        }
 
-    config.modResults.contents = src;
+        config.modResults.contents = src;
+        return config;
+    });
+
     return config;
-  });
-
-  return config;
 }
 
 module.exports = withWhatsAppShare;
