@@ -54,8 +54,14 @@ jobs:
         working-directory: android
         env:
           EXPO_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          keytool -genkeypair -v -keystore app/release.keystore -alias vaultkey -keyalg RSA -keysize 2048 -validity 10000 -storepass vault1234 -keypass vault1234 -dname "CN=PrivateMediaVault, OU=Mobile, O=AliUcak, L=Istanbul, C=TR"
+          if gh release view signing-keystore --repo ${{ github.repository }} >/dev/null 2>&1; then
+            gh release download signing-keystore --repo ${{ github.repository }} --pattern "release.keystore" --dir app
+          else
+            keytool -genkeypair -v -keystore app/release.keystore -alias vaultkey -keyalg RSA -keysize 2048 -validity 10000 -storepass vault1234 -keypass vault1234 -dname "CN=PrivateMediaVault, OU=Mobile, O=AliUcak, L=Istanbul, C=TR"
+            gh release create signing-keystore app/release.keystore --repo ${{ github.repository }} --title "Signing Keystore" --notes "Sabit APK imzalama anahtari" --latest=false
+          fi
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)

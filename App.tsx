@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -101,6 +101,7 @@ export default function App() {
   const [lastSyncInfo, setLastSyncInfo] = useState<string | null>(null);
   const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
   const [updatingApp, setUpdatingApp] = useState(false);
+  const suppressAutoLockRef = useRef(false);
 
   const [activeTab, setActiveTab] = useState<MainTab>('vault');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -242,6 +243,7 @@ export default function App() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (nextState) => {
       if (nextState === 'active') {
+        suppressAutoLockRef.current = false;
         const [notifOk, filesOk] = await Promise.all([
           isNotificationAccessEnabled(),
           hasAllFilesAccess(),
@@ -251,15 +253,20 @@ export default function App() {
         if (filesOk) {
           setAutoDetectedFolders(await findWhatsAppMediaFolders());
         }
-      } else {
+      } else if (nextState === 'background') {
         clearDecryptedCache();
-        if (settings.autoLockOnBackground && settings.pinSet) {
+        if (
+          settings.autoLockOnBackground &&
+          settings.pinSet &&
+          !suppressAutoLockRef.current &&
+          !contactsPickerVisible
+        ) {
           setUnlocked(false);
         }
       }
     });
     return () => sub.remove();
-  }, [settings.autoLockOnBackground, settings.pinSet]);
+  }, [settings.autoLockOnBackground, settings.pinSet, contactsPickerVisible]);
 
   const handleUnlock = useCallback(async () => {
     const updated = await loadSettings();
@@ -269,6 +276,7 @@ export default function App() {
   }, [refreshData]);
 
   const handlePickFromGallery = async () => {
+    suppressAutoLockRef.current = true;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,

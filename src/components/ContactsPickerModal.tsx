@@ -45,13 +45,14 @@ export function ContactsPickerModal({
         setLoading(true);
         const { status } = await Contacts.requestPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('İzin Gerekli', 'Rehberden kişi seçmek için Kişiler izni vermelisiniz.');
-          onClose();
+          if (active) {
+            Alert.alert('İzin Gerekli', 'Rehberden kişi seçmek için Kişiler izni vermelisiniz.');
+            onClose();
+          }
           return;
         }
         const { data } = await Contacts.getContactsAsync({
           fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
-          sort: Contacts.SortTypes.FirstName,
         });
         if (!active) return;
 
@@ -69,9 +70,16 @@ export function ContactsPickerModal({
             phone: c.phoneNumbers?.[0]?.number,
           });
         }
+        mapped.sort((a, b) => a.name.localeCompare(b.name, 'tr-TR'));
         setPhoneContacts(mapped);
-      } catch {
-        Alert.alert('Hata', 'Telefon rehberi okunamadı.');
+      } catch (err) {
+        if (active) {
+          Alert.alert(
+            'Hata',
+            err instanceof Error ? `Telefon rehberi okunamadı: ${err.message}` : 'Telefon rehberi okunamadı.'
+          );
+          onClose();
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -79,7 +87,7 @@ export function ContactsPickerModal({
     return () => {
       active = false;
     };
-  }, [visible, onClose]);
+  }, [visible]);
 
   const existingSet = useMemo(
     () => new Set(existingNames.map((n) => n.trim().toLocaleLowerCase('tr-TR'))),
