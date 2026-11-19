@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -33,10 +36,14 @@ jobs:
           npm test
 
       - name: Generate native Android project (Expo Prebuild)
+        env:
+          EXPO_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
         run: npx expo prebuild --platform android --non-interactive
 
       - name: Build Release APK
         working-directory: android
+        env:
+          EXPO_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
@@ -46,3 +53,11 @@ jobs:
         with:
           name: PrivateMediaVault-APK
           path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Publish GitHub Release for In-App Updater
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Sürüm 1.0.${{ github.run_number }}
+          body: Otomatik derlenen Android APK sürümü.
+          files: android/app/build/outputs/apk/release/app-release.apk

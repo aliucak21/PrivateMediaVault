@@ -18,15 +18,20 @@ function withWhatsAppShare(config) {
 
     application.$['android:allowBackup'] = 'false';
 
-    // Kişisel APK için WhatsApp klasörlerini otomatik bulabilme izni
+    // Kişisel APK için WhatsApp klasörlerini otomatik bulabilme ve uygulama içi güncelleme izinleri
     manifest.manifest['uses-permission'] = manifest.manifest['uses-permission'] || [];
-    const hasManageStorage = manifest.manifest['uses-permission'].some(
-      (p) => p.$['android:name'] === 'android.permission.MANAGE_EXTERNAL_STORAGE'
-    );
-    if (!hasManageStorage) {
-      manifest.manifest['uses-permission'].push({
-        $: { 'android:name': 'android.permission.MANAGE_EXTERNAL_STORAGE' },
-      });
+    for (const permName of [
+      'android.permission.MANAGE_EXTERNAL_STORAGE',
+      'android.permission.REQUEST_INSTALL_PACKAGES',
+    ]) {
+      const exists = manifest.manifest['uses-permission'].some(
+        (p) => p.$['android:name'] === permName
+      );
+      if (!exists) {
+        manifest.manifest['uses-permission'].push({
+          $: { 'android:name': permName },
+        });
+      }
     }
 
     const mainActivity = application.activity?.find(
@@ -481,6 +486,21 @@ class ShareIntentModule(private val reactContext: ReactApplicationContext) :
             promise.resolve(found)
         } catch (e: Exception) {
             promise.reject("FIND_WA_FOLDERS_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun installApk(contentUri: String, promise: Promise) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(Uri.parse(contentUri), "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            reactContext.startActivity(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("INSTALL_APK_ERROR", e.message, e)
         }
     }
 

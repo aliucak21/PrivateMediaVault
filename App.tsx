@@ -68,6 +68,11 @@ import {
   subscribeToWhatsAppNotifications,
   syncWhatsAppWithNotifications,
 } from './src/services/notificationWatcher';
+import {
+  checkForAppUpdate,
+  CURRENT_BUILD_NUMBER,
+  downloadAndInstallApk,
+} from './src/services/updater';
 import { LockScreen } from './src/components/LockScreen';
 import { MediaViewerModal } from './src/components/MediaViewerModal';
 import { ImportModal } from './src/components/ImportModal';
@@ -92,6 +97,8 @@ export default function App() {
   const [autoDetectedFolders, setAutoDetectedFolders] = useState<string[]>([]);
   const [syncingAuto, setSyncingAuto] = useState(false);
   const [lastSyncInfo, setLastSyncInfo] = useState<string | null>(null);
+  const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
+  const [updatingApp, setUpdatingApp] = useState(false);
 
   const [activeTab, setActiveTab] = useState<MainTab>('vault');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -886,6 +893,74 @@ export default function App() {
                     </Text>
                     <Text style={styles.secondaryActionSub}>
                       Arka planda durdurulmaması için "Kısıtlama yok" seçin
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <Text style={styles.sectionTitle}>Uygulama Güncelleme</Text>
+                <TouchableOpacity
+                  style={styles.secondaryAction}
+                  disabled={updatingApp}
+                  onPress={async () => {
+                    try {
+                      setUpdatingApp(true);
+                      setUpdateStatusText('Güncellemeler kontrol ediliyor...');
+                      const res = await checkForAppUpdate();
+                      if (!res.hasUpdate || !res.apkUrl) {
+                        setUpdateStatusText(`Güncel sürüm kullanılıyor (Yapı #${CURRENT_BUILD_NUMBER})`);
+                        Alert.alert('Güncel', `Uygulama zaten güncel (${res.latestTag}).`);
+                        return;
+                      }
+                      const apkUrl = res.apkUrl;
+                      Alert.alert(
+                        'Yeni Güncelleme Mevcut',
+                        `Yeni sürüm (${res.latestTag}) bulundu. İndirilip kurulsun mu?`,
+                        [
+                          {
+                            text: 'İptal',
+                            style: 'cancel',
+                            onPress: () => setUpdateStatusText(null),
+                          },
+                          {
+                            text: 'Güncelle',
+                            onPress: async () => {
+                              try {
+                                setUpdatingApp(true);
+                                await downloadAndInstallApk(apkUrl, (pct) => {
+                                  setUpdateStatusText(`İndiriliyor: %${pct}`);
+                                });
+                                setUpdateStatusText('Kurulum ekranı açıldı.');
+                              } catch (err) {
+                                Alert.alert(
+                                  'Güncelleme Hatası',
+                                  err instanceof Error ? err.message : 'APK indirilemedi.'
+                                );
+                                setUpdateStatusText(null);
+                              } finally {
+                                setUpdatingApp(false);
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    } catch (err) {
+                      Alert.alert(
+                        'Kontrol Hatası',
+                        err instanceof Error ? err.message : 'Güncelleme kontrol edilemedi.'
+                      );
+                      setUpdateStatusText(null);
+                    } finally {
+                      setUpdatingApp(false);
+                    }
+                  }}
+                >
+                  <Ionicons name="cloud-download-outline" size={20} color={VaultColors.accent} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.secondaryActionTitle}>
+                      Güncellemeleri Kontrol Et (Yapı #{CURRENT_BUILD_NUMBER})
+                    </Text>
+                    <Text style={styles.secondaryActionSub}>
+                      {updateStatusText || 'GitHub Releases üzerinden yeni APK sürümünü indirip kurar'}
                     </Text>
                   </View>
                 </TouchableOpacity>
