@@ -207,8 +207,27 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
 
         val extras = notification.extras ?: return
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: return
+        var title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+        val convTitle = extras.getCharSequence("android.conversationTitle")?.toString()?.trim() ?: ""
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
+
+        // MessagingStyle bildirimlerinde gönderen adı android.messages içinde olabilir
+        if (title.isEmpty() || title.equals("WhatsApp", ignoreCase = true)) {
+            if (convTitle.isNotEmpty()) {
+                title = convTitle
+            }
+        }
+        if (title.isEmpty() || title.equals("WhatsApp", ignoreCase = true)) {
+            try {
+                @Suppress("DEPRECATION")
+                val msgs = extras.getParcelableArray("android.messages")
+                if (!msgs.isNullOrEmpty()) {
+                    val lastBundle = msgs.last() as? android.os.Bundle
+                    val sender = lastBundle?.getCharSequence("sender")?.toString()?.trim()
+                    if (!sender.isNullOrEmpty()) title = sender
+                }
+            } catch (_: Exception) {}
+        }
 
         if (title.isEmpty() || title.equals("WhatsApp", ignoreCase = true)) return
 
@@ -521,6 +540,55 @@ class ShareIntentModule(private val reactContext: ReactApplicationContext) :
             promise.resolve(found)
         } catch (e: Exception) {
             promise.reject("FIND_WA_FOLDERS_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun scanRecentFiles(folderUris: com.facebook.react.bridge.ReadableArray, minTimestampMs: Double, promise: Promise) {
+        try {
+            val items = mutableListOf<Map<String, Any>>()
+            val mediaExts = setOf("jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "mp4", "mov", "mkv", "avi", "webm", "3gp", "m4v")
+            for (i in 0 until folderUris.size()) {
+                val uriStr = folderUris.getString(i) ?: continue
+                if (!uriStr.startsWith("file://")) continue
+                val path = Uri.parse(uriStr).path ?: continue
+                val dir = File(path)
+                if (!dir.exists() || !dir.isDirectory || !dir.canRead()) continue
+                val files = dir.listFiles() ?: continue
+                for (f in files) {
+                    if (!f.isFile || f.name.startsWith(".")) continue
+                    val ext = f.name.substringAfterLast('.', "").lowercase()
+                    if (ext !in mediaExts) continue
+                    val mod = f.lastModified()
+                    if (minTimestampMs > 0 && mod < minTimestampMs.toLong()) continue
+                    val mime = if (ext in setOf("mp4", "mov", "mkv", "avi", "webm", "3gp", "m4v")) "video/mp4" else "image/jpeg"
+                    items.add(
+                        mapOf(
+                            "uri" to Uri.fromFile(f).toString(),
+                            "fileName" to f.name,
+                            "mimeType" to mime,
+                            "size" to f.length().toDouble(),
+                            "modifiedAt" to mod.toDouble()
+                        )
+                    )
+                }
+            }
+            items.sortByDescending { it["modifiedAt"] as Double }
+            val result: WritableArray = Arguments.createArray()
+            val limit = minOf(items.size, 40)
+            for (i in 0 until limit) {
+                val it = items[i]
+                val map = Arguments.createMap()
+                map.putString("uri", it["uri"] as String)
+                map.putString("fileName", it["fileName"] as String)
+                map.putString("mimeType", it["mimeType"] as String)
+                map.putDouble("size", it["size"] as Double)
+                map.putDouble("modifiedAt", it["modifiedAt"] as Double)
+                result.pushMap(map)
+            }
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("SCAN_RECENT_ERROR", e.message, e)
         }
     }
 

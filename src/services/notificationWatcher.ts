@@ -12,6 +12,14 @@ import {
   scanSafDirectoryForMedia,
 } from './vaultStorage';
 
+interface RecentFileEntry {
+  uri: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  modifiedAt: number;
+}
+
 interface NativeNotifModule {
   isNotificationAccessEnabled(): Promise<boolean>;
   openNotificationAccessSettings(): Promise<boolean>;
@@ -21,6 +29,7 @@ interface NativeNotifModule {
   hasAllFilesAccess(): Promise<boolean>;
   openAllFilesAccessSettings(): Promise<boolean>;
   findWhatsAppMediaFolders(): Promise<string[]>;
+  scanRecentFiles(folderUris: string[], minTimestampMs: number): Promise<RecentFileEntry[]>;
 }
 
 const nativeModule: NativeNotifModule | undefined =
@@ -92,6 +101,7 @@ export interface AutoSyncReport {
   syncedCount: number;
   deletedOriginalsCount: number;
   matchedNames: string[];
+  latestNotification?: CapturedNotification | null;
 }
 
 /**
@@ -103,13 +113,11 @@ export async function syncWhatsAppWithNotifications(
   safUris: string[],
   options: { encrypt: boolean; deleteOriginals: boolean; minTimestamp?: number }
 ): Promise<AutoSyncReport> {
-  if (contacts.length === 0 || safUris.length === 0) {
-    return { syncedCount: 0, deletedOriginalsCount: 0, matchedNames: [] };
-  }
-
   const notifications = await getCapturedNotifications();
-  if (notifications.length === 0) {
-    return { syncedCount: 0, deletedOriginalsCount: 0, matchedNames: [] };
+  const latestNotification = notifications.length > 0 ? notifications[notifications.length - 1] : null;
+
+  if (contacts.length === 0 || safUris.length === 0 || notifications.length === 0) {
+    return { syncedCount: 0, deletedOriginalsCount: 0, matchedNames: [], latestNotification };
   }
 
   const existingMedia = await listAllMedia();
@@ -117,22 +125,71 @@ export async function syncWhatsAppWithNotifications(
     existingMedia.map((m) => m.originalUri).filter((u): u is string => Boolean(u))
   );
 
-  // Yalnızca son 10 dakika içinde takip edilen kişilerden gelen bildirimleri dikkate al
+  // Yalnızca son 15 dakika içinde takip edilen kişilerden gelen bildirimleri dikkate al
   const now = Date.now();
   const recentNotifs = notifications.filter(
     (n) =>
-      now - n.timestamp <= 10 * 60 * 1000 &&
+      now - n.timestamp <= 15 * 60 * 1000 &&
       Boolean(matchNotificationToContact(n.senderName, contacts))
   );
   if (recentNotifs.length === 0) {
-    return { syncedCount: 0, deletedOriginalsCount: 0, matchedNames: [] };
+    return { syncedCount: 0, deletedOriginalsCount: 0, matchedNames: [], latestNotification };
   }
 
   let syncedCount = 0;
   let deletedOriginalsCount = 0;
   const matchedNameSet = new Set<string>();
 
-  for (const dirUri of safUris) {
+  const minTs = options.minTimestamp || now - 15 * 60 * 1000;
+  const fileFolderUris = safUris.filter((u) => u.startsWith('file://'));
+  const safOnlyUris = safUris.filter((u) => !u.startsWith('file://'));
+
+  // 1. Native hızlı tarama (file:// klasörlerinde lastModified sırasıyla en yeni 40 dosya)
+  if (fileFolderUris.length > 0 && nativeModule?.scanRecentFiles) {
+    try {
+      const recentFiles = await nativeModule.scanRecentFiles(fileFolderUris, minTs);
+      for (const f of recentFiles) {
+        if (knownOriginalUris.has(f.uri)) continue;
+        const targetContact = findMatchingContactForMedia(
+          f.modifiedAt,
+          recentNotifs,
+          contacts,
+          90_000
+        );
+        if (!targetContact) continue;
+
+        const summary = await importMediaItemsToContact(
+          targetContact,
+          [
+            {
+              uri: f.uri,
+              fileName: f.fileName,
+              mimeType: f.mimeType,
+              size: f.size,
+              isSafUri: false,
+              isExternalOriginal: true,
+              createdAt: f.modifiedAt,
+            },
+          ],
+          { encrypt: options.encrypt }
+        );
+
+        if (summary.importedCount > 0) {
+          syncedCount += summary.importedCount;
+          matchedNameSet.add(targetContact.name);
+          knownOriginalUris.add(f.uri);
+          if (options.deleteOriginals && summary.originalUrisToDelete.length > 0) {
+            deletedOriginalsCount += await deleteSafOriginals(summary.originalUrisToDelete);
+          }
+        }
+      }
+    } catch {
+      // Native tarama hatası SAF taramasını engellemesin
+    }
+  }
+
+  // 2. SAF (content://) klasörleri için tarama
+  for (const dirUri of safOnlyUris) {
     let entries = [];
     try {
       entries = await scanSafDirectoryForMedia(dirUri);
@@ -143,7 +200,6 @@ export async function syncWhatsAppWithNotifications(
     const newEntries = entries.filter((e) => !knownOriginalUris.has(e.uri));
     if (newEntries.length === 0) continue;
 
-    // En son 20 yeni dosyayı kontrol et
     const candidates = newEntries.slice(-20);
 
     for (const item of candidates) {
@@ -160,16 +216,14 @@ export async function syncWhatsAppWithNotifications(
         fileTimestamp = null;
       }
 
-      // Dosya zamanı okunamıyorsa veya otomatik aktarım açılmadan önce oluşmuşsa atla
       if (fileTimestamp === null) continue;
-      if (options.minTimestamp && fileTimestamp < options.minTimestamp) continue;
+      if (fileTimestamp < minTs) continue;
 
-      // Sıkı zaman penceresi: dosya, bildirimden en fazla 15 sn önce veya 45 sn sonra oluşmuş olmalı
       const targetContact = findMatchingContactForMedia(
         fileTimestamp,
         recentNotifs,
         contacts,
-        45_000
+        90_000
       );
 
       if (!targetContact) continue;
@@ -194,5 +248,6 @@ export async function syncWhatsAppWithNotifications(
     syncedCount,
     deletedOriginalsCount,
     matchedNames: Array.from(matchedNameSet),
+    latestNotification,
   };
 }

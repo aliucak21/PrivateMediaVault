@@ -195,11 +195,17 @@ export default function App() {
           const msg = `${report.syncedCount} dosya (${report.matchedNames.join(', ')}) kasaya aktarıldı.`;
           setLastSyncInfo(msg);
           if (!silent) Alert.alert('Otomatik Aktarım', msg);
-        } else if (!silent) {
-          Alert.alert(
-            'Yeni Eşleşme Yok',
-            'Son WhatsApp bildirimleriyle eşleşen yeni fotoğraf veya video bulunamadı.'
-          );
+        } else {
+          const notifInfo = report.latestNotification
+            ? `Son bildirim: ${report.latestNotification.senderName} (${formatDateTr(report.latestNotification.timestamp)})`
+            : 'Henüz WhatsApp bildirimi yakalanmadı';
+          setLastSyncInfo(notifInfo);
+          if (!silent) {
+            Alert.alert(
+              'Yeni Eşleşme Yok',
+              `${notifInfo}\n\nTaranan klasör sayısı: ${allSafUris.length}`
+            );
+          }
         }
       } finally {
         setSyncingAuto(false);
