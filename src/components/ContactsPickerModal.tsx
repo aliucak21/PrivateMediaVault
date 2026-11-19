@@ -10,7 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as Contacts from 'expo-contacts';
+import * as Contacts from 'expo-contacts/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { VaultColors } from '../theme/colors';
 
