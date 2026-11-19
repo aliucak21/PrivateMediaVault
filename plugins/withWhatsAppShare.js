@@ -106,12 +106,14 @@ function withWhatsAppShare(config) {
   // 1b. release APK'nın her zaman debug keystore ile imzalanmasını garanti et
   config = withAppBuildGradle(config, (config) => {
     let contents = config.modResults.contents;
-    if (contents.includes('buildTypes {') && !contents.includes('signingConfig signingConfigs.debug')) {
-      contents = contents.replace(
-        /release\s*\{/,
-        'release {\n            signingConfig signingConfigs.debug'
-      );
-    }
+    // Yalnızca release bloğunun içinde signingConfig yoksa ekle (debug bloğundakiyle karışmasın)
+    contents = contents.replace(
+      /(buildTypes\s*\{[\s\S]*?release\s*\{)([\s\S]*?)(\})/,
+      (match, start, body, end) => {
+        if (body.includes('signingConfig')) return match;
+        return `${start}\n            signingConfig signingConfigs.debug${body}${end}`;
+      }
+    );
     config.modResults.contents = contents;
     return config;
   });
