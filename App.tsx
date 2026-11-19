@@ -59,7 +59,10 @@ import {
   subscribeToSharedMedia,
 } from './src/services/shareIntent';
 import {
+  findWhatsAppMediaFolders,
+  hasAllFilesAccess,
   isNotificationAccessEnabled,
+  openAllFilesAccessSettings,
   openBatteryOptimizationSettings,
   openNotificationAccessSettings,
   subscribeToWhatsAppNotifications,
@@ -85,6 +88,8 @@ export default function App() {
     lastSyncAt: null,
   });
   const [notifAccessOk, setNotifAccessOk] = useState(false);
+  const [allFilesOk, setAllFilesOk] = useState(false);
+  const [autoDetectedFolders, setAutoDetectedFolders] = useState<string[]>([]);
   const [syncingAuto, setSyncingAuto] = useState(false);
   const [lastSyncInfo, setLastSyncInfo] = useState<string | null>(null);
 
@@ -124,14 +129,18 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await ensureVaultRoot();
-      const [loadedSettings, bioOk, notifOk] = await Promise.all([
+      const [loadedSettings, bioOk, notifOk, filesOk] = await Promise.all([
         loadSettings(),
         isBiometricAvailable(),
         isNotificationAccessEnabled(),
+        hasAllFilesAccess(),
       ]);
+      const detected = filesOk ? await findWhatsAppMediaFolders() : [];
       setSettings(loadedSettings);
       setBioHardwareOk(bioOk);
       setNotifAccessOk(notifOk);
+      setAllFilesOk(filesOk);
+      setAutoDetectedFolders(detected);
       await refreshData();
       setReady(true);
     })();
@@ -140,8 +149,12 @@ export default function App() {
   const runAutoSync = useCallback(
     async (silent = false) => {
       if (syncingAuto) return;
+      const detectedNow = allFilesOk ? await findWhatsAppMediaFolders() : [];
+      if (detectedNow.length > 0) setAutoDetectedFolders(detectedNow);
+
       const allSafUris = Array.from(
         new Set([
+          ...detectedNow,
           ...(settings.whatsappSafUris || []),
           ...(settings.whatsappSafUri ? [settings.whatsappSafUri] : []),
         ])
@@ -150,7 +163,7 @@ export default function App() {
         if (!silent) {
           Alert.alert(
             'Eksik Kurulum',
-            'Otomatik aktarım için en az 1 kişi ekleyin ve WhatsApp medya klasörünü bağlayın.'
+            'Otomatik aktarım için en az 1 kişi ekleyin ve "Tüm Dosyalara Erişim" iznini verin (veya WhatsApp klasörünü bağlayın).'
           );
         }
         return;
@@ -182,6 +195,7 @@ export default function App() {
     },
     [
       syncingAuto,
+      allFilesOk,
       settings.whatsappSafUris,
       settings.whatsappSafUri,
       settings.encryptionEnabled,
@@ -216,8 +230,15 @@ export default function App() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (nextState) => {
       if (nextState === 'active') {
-        const notifOk = await isNotificationAccessEnabled();
+        const [notifOk, filesOk] = await Promise.all([
+          isNotificationAccessEnabled(),
+          hasAllFilesAccess(),
+        ]);
         setNotifAccessOk(notifOk);
+        setAllFilesOk(filesOk);
+        if (filesOk) {
+          setAutoDetectedFolders(await findWhatsAppMediaFolders());
+        }
       } else {
         clearDecryptedCache();
         if (settings.autoLockOnBackground && settings.pinSet) {
@@ -257,6 +278,19 @@ export default function App() {
 
   const handleScanWhatsAppSaf = async () => {
     try {
+      if (allFilesOk && autoDetectedFolders.length > 0) {
+        const allFound: PendingImportItem[] = [];
+        for (const folder of autoDetectedFolders) {
+          const items = await scanSafDirectoryForMedia(folder);
+          allFound.push(...items);
+        }
+        if (allFound.length > 0) {
+          setPendingImports(allFound);
+          setImportModalVisible(true);
+          return;
+        }
+      }
+
       let dirUri = settings.whatsappSafUri;
       if (!dirUri) {
         Alert.alert(
@@ -770,6 +804,25 @@ export default function App() {
                     />
                   </View>
                 </View>
+
+                <TouchableOpacity
+                  style={styles.secondaryAction}
+                  onPress={() => openAllFilesAccessSettings()}
+                >
+                  <Ionicons
+                    name={allFilesOk ? 'checkmark-circle' : 'folder-open-outline'}
+                    size={22}
+                    color={allFilesOk ? VaultColors.primary : VaultColors.warning}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.secondaryActionTitle}>
+                      Tüm Dosyalara Erişim: {allFilesOk ? `Açık (${autoDetectedFolders.length} klasör bulundu)` : 'Kapalı (Otomatik Bul)'}
+                    </Text>
+                    <Text style={styles.secondaryActionSub}>
+                      Açıldığında WhatsApp Images/Video/Private klasörlerini kendisi otomatik bulur
+                    </Text>
+                  </View>
+                </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.secondaryAction}

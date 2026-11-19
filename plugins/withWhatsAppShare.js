@@ -18,6 +18,17 @@ function withWhatsAppShare(config) {
 
     application.$['android:allowBackup'] = 'false';
 
+    // Kişisel APK için WhatsApp klasörlerini otomatik bulabilme izni
+    manifest.manifest['uses-permission'] = manifest.manifest['uses-permission'] || [];
+    const hasManageStorage = manifest.manifest['uses-permission'].some(
+      (p) => p.$['android:name'] === 'android.permission.MANAGE_EXTERNAL_STORAGE'
+    );
+    if (!hasManageStorage) {
+      manifest.manifest['uses-permission'].push({
+        $: { 'android:name': 'android.permission.MANAGE_EXTERNAL_STORAGE' },
+      });
+    }
+
     const mainActivity = application.activity?.find(
       (act) => act.$['android:name'] === '.MainActivity'
     );
@@ -178,6 +189,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.OpenableColumns
 import android.provider.Settings
 import com.facebook.react.ReactPackage
@@ -361,6 +374,71 @@ class ShareIntentModule(private val reactContext: ReactApplicationContext) :
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("NOTIF_CLEAR_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun hasAllFilesAccess(promise: Promise) {
+        try {
+            val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                true
+            }
+            promise.resolve(granted)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun openAllFilesAccessSettings(promise: Promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:\${reactContext.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                reactContext.startActivity(intent)
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            try {
+                val fallback = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                reactContext.startActivity(fallback)
+                promise.resolve(true)
+            } catch (ex: Exception) {
+                promise.reject("ALL_FILES_SETTINGS_ERROR", ex.message, ex)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun findWhatsAppMediaFolders(promise: Promise) {
+        try {
+            val root = Environment.getExternalStorageDirectory()
+            val candidates = listOf(
+                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images",
+                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/Private",
+                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video",
+                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video/Private",
+                "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/WhatsApp Business Images",
+                "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/WhatsApp Business Video",
+                "WhatsApp/Media/WhatsApp Images",
+                "WhatsApp/Media/WhatsApp Video"
+            )
+            val found: WritableArray = Arguments.createArray()
+            for (rel in candidates) {
+                val dir = File(root, rel)
+                if (dir.exists() && dir.isDirectory && dir.canRead()) {
+                    found.pushString(Uri.fromFile(dir).toString())
+                }
+            }
+            promise.resolve(found)
+        } catch (e: Exception) {
+            promise.reject("FIND_WA_FOLDERS_ERROR", e.message, e)
         }
     }
 

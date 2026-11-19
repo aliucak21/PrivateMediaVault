@@ -160,11 +160,12 @@ export async function importMediaItemsToContact(
       }
 
       const now = Date.now();
+      const isOriginalSource = Boolean(item.isSafUri || item.isExternalOriginal);
       const insertedId = await insertMediaItem({
         contactId: contact.id,
         fileName: safeName,
         vaultUri: destUri,
-        originalUri: item.isSafUri ? item.uri : null,
+        originalUri: isOriginalSource ? item.uri : null,
         mediaType,
         mimeType: item.mimeType || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
         sizeBytes,
@@ -177,7 +178,7 @@ export async function importMediaItemsToContact(
       existingHashes.add(sha256);
       summary.importedCount += 1;
       summary.importedIds.push(insertedId);
-      if (item.isSafUri) {
+      if (isOriginalSource) {
         summary.originalUrisToDelete.push(item.uri);
       }
     } catch {
@@ -241,34 +242,77 @@ export async function shareMediaOut(media: VaultMedia): Promise<void> {
   await Sharing.shareAsync(uri, { mimeType: media.mimeType });
 }
 
+const WHATSAPP_INITIAL_SAF_URI =
+  'content://com.android.externalstorage.documents/document/primary%3AAndroid%2Fmedia%2Fcom.whatsapp%2FWhatsApp%2FMedia';
+
 export async function requestWhatsAppSafFolder(): Promise<string | null> {
-  const perm = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+  const perm = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
+    WHATSAPP_INITIAL_SAF_URI
+  );
   if (!perm.granted) return null;
   return perm.directoryUri;
 }
 
 export async function scanSafDirectoryForMedia(dirUri: string): Promise<PendingImportItem[]> {
-  const entries = await FileSystem.StorageAccessFramework.readDirectoryAsync(dirUri);
   const results: PendingImportItem[] = [];
 
-  for (const uri of entries) {
-    const decoded = decodeURIComponent(uri);
-    const fileName = decoded.split('/').pop() || decoded.split(':').pop() || 'medya';
-    if (fileName.startsWith('.')) continue;
-
-    const mediaType = detectMediaType(fileName, null);
-    if (!mediaType) continue;
-
-    results.push({
-      uri,
-      fileName,
-      mimeType: mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
-      size: 0,
-      isSafUri: true,
-      createdAt: Date.now(),
-    });
+  // Tüm Dosyalara Erişim ile bulunan doğrudan file:// klasörleri
+  if (dirUri.startsWith('file://')) {
+    const base = dirUri.endsWith('/') ? dirUri : `${dirUri}/`;
+    const entries = await FileSystem.readDirectoryAsync(dirUri);
+    for (const fileName of entries) {
+      if (fileName.startsWith('.')) continue;
+      const mediaType = detectMediaType(fileName, null);
+      if (!mediaType) continue;
+      results.push({
+        uri: `${base}${fileName}`,
+        fileName,
+        mimeType: mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+        size: 0,
+        isSafUri: false,
+        isExternalOriginal: true,
+        createdAt: Date.now(),
+      });
+    }
+    return results;
   }
 
+  // SAF (content://) klasörü ve bilindik alt klasörleri (1 seviye)
+  const scanSafLevel = async (uriToScan: string, allowSubdirs: boolean) => {
+    const entries = await FileSystem.StorageAccessFramework.readDirectoryAsync(uriToScan);
+    for (const uri of entries) {
+      const decoded = decodeURIComponent(uri);
+      const fileName = decoded.split('/').pop() || decoded.split(':').pop() || 'medya';
+      if (fileName.startsWith('.')) continue;
+
+      const mediaType = detectMediaType(fileName, null);
+      if (mediaType) {
+        results.push({
+          uri,
+          fileName,
+          mimeType: mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+          size: 0,
+          isSafUri: true,
+          createdAt: Date.now(),
+        });
+      } else if (
+        allowSubdirs &&
+        (fileName === 'WhatsApp Images' ||
+          fileName === 'WhatsApp Video' ||
+          fileName === 'Private' ||
+          fileName === 'WhatsApp Business Images' ||
+          fileName === 'WhatsApp Business Video')
+      ) {
+        try {
+          await scanSafLevel(uri, false);
+        } catch {
+          // Alt klasör okunamazsa devam et
+        }
+      }
+    }
+  };
+
+  await scanSafLevel(dirUri, true);
   return results;
 }
 
@@ -276,10 +320,14 @@ export async function deleteSafOriginals(uris: string[]): Promise<number> {
   let deleted = 0;
   for (const uri of uris) {
     try {
-      await FileSystem.StorageAccessFramework.deleteAsync(uri, { idempotent: true });
+      if (uri.startsWith('file://')) {
+        await FileSystem.deleteAsync(uri, { idempotent: true });
+      } else {
+        await FileSystem.StorageAccessFramework.deleteAsync(uri, { idempotent: true });
+      }
       deleted += 1;
     } catch {
-      // Bazı üretici ROM'larında SAF silme izni kısıtlı olabilir
+      // Bazı üretici ROM'larında silme izni kısıtlı olabilir
     }
   }
   return deleted;

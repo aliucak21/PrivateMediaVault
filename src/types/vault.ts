@@ -55,6 +55,7 @@ export interface PendingImportItem {
   mimeType: string;
   size: number;
   isSafUri?: boolean;
+  isExternalOriginal?: boolean;
   createdAt?: number;
 }
 

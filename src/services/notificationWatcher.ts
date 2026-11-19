@@ -18,6 +18,9 @@ interface NativeNotifModule {
   openBatteryOptimizationSettings(): Promise<boolean>;
   getCapturedNotifications(): Promise<CapturedNotification[]>;
   clearCapturedNotifications(): Promise<boolean>;
+  hasAllFilesAccess(): Promise<boolean>;
+  openAllFilesAccessSettings(): Promise<boolean>;
+  findWhatsAppMediaFolders(): Promise<string[]>;
 }
 
 const nativeModule: NativeNotifModule | undefined =
@@ -41,6 +44,31 @@ export async function openNotificationAccessSettings(): Promise<void> {
 export async function openBatteryOptimizationSettings(): Promise<void> {
   if (nativeModule?.openBatteryOptimizationSettings) {
     await nativeModule.openBatteryOptimizationSettings();
+  }
+}
+
+export async function hasAllFilesAccess(): Promise<boolean> {
+  if (!nativeModule?.hasAllFilesAccess) return false;
+  try {
+    return await nativeModule.hasAllFilesAccess();
+  } catch {
+    return false;
+  }
+}
+
+export async function openAllFilesAccessSettings(): Promise<void> {
+  if (nativeModule?.openAllFilesAccessSettings) {
+    await nativeModule.openAllFilesAccessSettings();
+  }
+}
+
+export async function findWhatsAppMediaFolders(): Promise<string[]> {
+  if (!nativeModule?.findWhatsAppMediaFolders) return [];
+  try {
+    const folders = await nativeModule.findWhatsAppMediaFolders();
+    return Array.isArray(folders) ? folders : [];
+  } catch {
+    return [];
   }
 }
 
