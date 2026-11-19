@@ -58,6 +58,13 @@ import {
   consumePendingSharedMedia,
   subscribeToSharedMedia,
 } from './src/services/shareIntent';
+import {
+  isNotificationAccessEnabled,
+  openBatteryOptimizationSettings,
+  openNotificationAccessSettings,
+  subscribeToWhatsAppNotifications,
+  syncWhatsAppWithNotifications,
+} from './src/services/notificationWatcher';
 import { LockScreen } from './src/components/LockScreen';
 import { MediaViewerModal } from './src/components/MediaViewerModal';
 import { ImportModal } from './src/components/ImportModal';
@@ -72,7 +79,14 @@ export default function App() {
     encryptionEnabled: false,
     lastSelectedContactId: null,
     whatsappSafUri: null,
+    whatsappSafUris: [],
+    autoSyncEnabled: false,
+    autoDeleteOriginalOnSync: false,
+    lastSyncAt: null,
   });
+  const [notifAccessOk, setNotifAccessOk] = useState(false);
+  const [syncingAuto, setSyncingAuto] = useState(false);
+  const [lastSyncInfo, setLastSyncInfo] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<MainTab>('vault');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -110,29 +124,101 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await ensureVaultRoot();
-      const [loadedSettings, bioOk] = await Promise.all([
+      const [loadedSettings, bioOk, notifOk] = await Promise.all([
         loadSettings(),
         isBiometricAvailable(),
+        isNotificationAccessEnabled(),
       ]);
       setSettings(loadedSettings);
       setBioHardwareOk(bioOk);
+      setNotifAccessOk(notifOk);
       await refreshData();
       setReady(true);
     })();
   }, [refreshData]);
 
+  const runAutoSync = useCallback(
+    async (silent = false) => {
+      if (syncingAuto) return;
+      const allSafUris = Array.from(
+        new Set([
+          ...(settings.whatsappSafUris || []),
+          ...(settings.whatsappSafUri ? [settings.whatsappSafUri] : []),
+        ])
+      );
+      if (allSafUris.length === 0 || contacts.length === 0) {
+        if (!silent) {
+          Alert.alert(
+            'Eksik Kurulum',
+            'Otomatik aktarım için en az 1 kişi ekleyin ve WhatsApp medya klasörünü bağlayın.'
+          );
+        }
+        return;
+      }
+
+      try {
+        setSyncingAuto(true);
+        const report = await syncWhatsAppWithNotifications(contacts, allSafUris, {
+          encrypt: settings.encryptionEnabled,
+          deleteOriginals: settings.autoDeleteOriginalOnSync,
+        });
+        const next = await saveSettings({ lastSyncAt: Date.now() });
+        setSettings(next);
+
+        if (report.syncedCount > 0) {
+          await refreshData();
+          const msg = `${report.syncedCount} dosya (${report.matchedNames.join(', ')}) kasaya aktarıldı.`;
+          setLastSyncInfo(msg);
+          if (!silent) Alert.alert('Otomatik Aktarım', msg);
+        } else if (!silent) {
+          Alert.alert(
+            'Yeni Eşleşme Yok',
+            'Son WhatsApp bildirimleriyle eşleşen yeni fotoğraf veya video bulunamadı.'
+          );
+        }
+      } finally {
+        setSyncingAuto(false);
+      }
+    },
+    [
+      syncingAuto,
+      settings.whatsappSafUris,
+      settings.whatsappSafUri,
+      settings.encryptionEnabled,
+      settings.autoDeleteOriginalOnSync,
+      contacts,
+      refreshData,
+    ]
+  );
+
   useEffect(() => {
     if (!unlocked) return;
     checkPendingShares();
-    const unsub = subscribeToSharedMedia(() => {
+    const unsubShare = subscribeToSharedMedia(() => {
       checkPendingShares();
     });
-    return unsub;
-  }, [unlocked, checkPendingShares]);
+    const unsubNotif = subscribeToWhatsAppNotifications(() => {
+      if (settings.autoSyncEnabled) {
+        setTimeout(() => {
+          runAutoSync(true);
+        }, 2500);
+      }
+    });
+    if (settings.autoSyncEnabled) {
+      runAutoSync(true);
+    }
+    return () => {
+      unsubShare();
+      unsubNotif();
+    };
+  }, [unlocked, checkPendingShares, settings.autoSyncEnabled, runAutoSync]);
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState !== 'active') {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'active') {
+        const notifOk = await isNotificationAccessEnabled();
+        setNotifAccessOk(notifOk);
+      } else {
         clearDecryptedCache();
         if (settings.autoLockOnBackground && settings.pinSet) {
           setUnlocked(false);
@@ -490,6 +576,31 @@ export default function App() {
                   </View>
                 </TouchableOpacity>
 
+                <TouchableOpacity
+                  style={styles.secondaryAction}
+                  onPress={() => runAutoSync(false)}
+                  disabled={syncingAuto}
+                >
+                  <Ionicons
+                    name={syncingAuto ? 'sync' : 'notifications-outline'}
+                    size={22}
+                    color={VaultColors.accent}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.secondaryActionTitle}>
+                      {syncingAuto
+                        ? 'Bildirimler Eşleştiriliyor...'
+                        : 'Bildirim + Klasör Eşleştirmeyi Çalıştır'}
+                    </Text>
+                    <Text style={styles.secondaryActionSub}>
+                      {lastSyncInfo ||
+                        (notifAccessOk
+                          ? 'Son WhatsApp bildirimlerindeki kişilere gelen dosyaları aktarır'
+                          : 'Ayarlar’dan Bildirim Erişimi izni verilmesi gerekir')}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
                 <View style={styles.infoBanner}>
                   <Ionicons name="logo-whatsapp" size={20} color={VaultColors.primary} />
                   <Text style={styles.infoBannerText}>
@@ -631,24 +742,95 @@ export default function App() {
                   </TouchableOpacity>
                 </View>
 
-                <Text style={styles.sectionTitle}>WhatsApp Klasör Bağlantısı</Text>
+                <Text style={styles.sectionTitle}>Otomatik WhatsApp Aktarımı (Bildirim + Klasör)</Text>
+                <View style={styles.settingCard}>
+                  <View style={styles.settingRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.settingTitle}>Bildirim + Klasör Otomatik Aktarım</Text>
+                      <Text style={styles.settingSub}>
+                        Bildirimdeki gönderen adını takip edilen kişiyle eşleştirip dosyayı otomatik alır
+                      </Text>
+                    </View>
+                    <Switch
+                      value={settings.autoSyncEnabled}
+                      onValueChange={(v) => handleUpdateSetting({ autoSyncEnabled: v })}
+                    />
+                  </View>
+
+                  <View style={styles.settingRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.settingTitle}>Aktarınca Orijinali Sil</Text>
+                      <Text style={styles.settingSub}>
+                        Kasaya kopyalama doğrulandıktan sonra WhatsApp klasöründen siler
+                      </Text>
+                    </View>
+                    <Switch
+                      value={settings.autoDeleteOriginalOnSync}
+                      onValueChange={(v) => handleUpdateSetting({ autoDeleteOriginalOnSync: v })}
+                    />
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.secondaryAction}
+                  onPress={() => openNotificationAccessSettings()}
+                >
+                  <Ionicons
+                    name={notifAccessOk ? 'checkmark-circle' : 'notifications-off-outline'}
+                    size={22}
+                    color={notifAccessOk ? VaultColors.primary : VaultColors.warning}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.secondaryActionTitle}>
+                      Bildirim Erişimi: {notifAccessOk ? 'Açık' : 'Kapalı (İzin Ver)'}
+                    </Text>
+                    <Text style={styles.secondaryActionSub}>
+                      WhatsApp bildirimlerinden gönderen adını okuyabilmek için gereklidir
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={styles.secondaryAction}
                   onPress={async () => {
                     const chosen = await requestWhatsAppSafFolder();
                     if (chosen) {
-                      await handleUpdateSetting({ whatsappSafUri: chosen });
-                      Alert.alert('Bağlandı', 'WhatsApp medya klasörü kaydedildi.');
+                      const nextList = Array.from(
+                        new Set([...(settings.whatsappSafUris || []), chosen])
+                      );
+                      await handleUpdateSetting({
+                        whatsappSafUri: settings.whatsappSafUri || chosen,
+                        whatsappSafUris: nextList,
+                      });
+                      Alert.alert(
+                        'Klasör Bağlandı',
+                        `Toplam ${nextList.length} WhatsApp klasörü izleniyor (Images ve Video klasörlerini ayrı ayrı ekleyebilirsiniz).`
+                      );
                     }
                   }}
                 >
                   <Ionicons name="folder-outline" size={20} color={VaultColors.accent} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.secondaryActionTitle}>
-                      {settings.whatsappSafUri ? 'WhatsApp Klasörünü Değiştir' : 'WhatsApp Klasörünü Bağla'}
+                      WhatsApp Klasörü Ekle ({(settings.whatsappSafUris || []).length} bağlı)
                     </Text>
                     <Text style={styles.secondaryActionSub} numberOfLines={1}>
-                      {settings.whatsappSafUri || 'Henüz klasör seçilmedi'}
+                      WhatsApp Images ve WhatsApp Video klasörlerini bağlayın
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.secondaryAction}
+                  onPress={() => openBatteryOptimizationSettings()}
+                >
+                  <Ionicons name="battery-charging-outline" size={20} color={VaultColors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.secondaryActionTitle}>
+                      Xiaomi Pil Optimizasyonu Ayarları
+                    </Text>
+                    <Text style={styles.secondaryActionSub}>
+                      Arka planda durdurulmaması için "Kısıtlama yok" seçin
                     </Text>
                   </View>
                 </TouchableOpacity>

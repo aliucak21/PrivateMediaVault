@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import {
   detectMediaType,
   filterAndSortMedia,
+  findMatchingContactForMedia,
   formatBytes,
   isDuplicateHash,
+  matchNotificationToContact,
+  normalizeSenderName,
   sanitizeFileName,
   sanitizeFolderName,
 } from '../src/utils/vaultCore.ts';
-import type { VaultMedia } from '../src/types/vault.ts';
+import type { CapturedNotification, Contact, VaultMedia } from '../src/types/vault.ts';
 
 describe('vaultCore', () => {
   it('detects photo and video types from mime or extension', () => {
@@ -104,5 +107,33 @@ describe('vaultCore', () => {
 
     const searchZeynep = filterAndSortMedia(sample, { query: 'zeynep' });
     assert.deepEqual(searchZeynep.map((m) => m.id), [3]);
+  });
+
+  it('normalizes WhatsApp sender names and matches contacts', () => {
+    assert.equal(normalizeSenderName('Ahmet (3 mesaj)'), 'ahmet');
+    const contacts: Contact[] = [
+      { id: 1, name: 'Ahmet', folderName: 'ahmet_1', createdAt: 1 },
+      { id: 2, name: 'Çağrı', folderName: 'cagri_2', createdAt: 2 },
+    ];
+    assert.equal(matchNotificationToContact('Ahmet (2 mesaj)', contacts)?.id, 1);
+    assert.equal(matchNotificationToContact('çağrı', contacts)?.id, 2);
+    assert.equal(matchNotificationToContact('Bilinmeyen', contacts), null);
+  });
+
+  it('finds closest notification within time window for incoming media', () => {
+    const contacts: Contact[] = [
+      { id: 1, name: 'Ahmet', folderName: 'ahmet_1', createdAt: 1 },
+      { id: 2, name: 'Zeynep', folderName: 'zeynep_2', createdAt: 2 },
+    ];
+    const notifs: CapturedNotification[] = [
+      { senderName: 'Zeynep', text: '📷 Fotoğraf', timestamp: 100_000 },
+      { senderName: 'Ahmet', text: '🎥 Video', timestamp: 200_000 },
+    ];
+
+    const matched = findMatchingContactForMedia(203_000, notifs, contacts, 60_000);
+    assert.equal(matched?.id, 1);
+
+    const tooOld = findMatchingContactForMedia(500_000, notifs, contacts, 60_000);
+    assert.equal(tooOld, null);
   });
 });

@@ -19,7 +19,13 @@
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
         "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO"
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_AUDIO"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -49,6 +55,11 @@
       "expo-sharing",
       "expo-video",
       "./plugins/withWhatsAppShare"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ba192cb5-db08-48c0-b417-f3263b34ffee"
+      }
+    }
   }
 }

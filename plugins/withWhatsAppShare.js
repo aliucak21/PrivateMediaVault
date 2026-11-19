@@ -4,10 +4,10 @@ const path = require('path');
 
 /**
  * Expo Config Plugin:
- * 1. android:allowBackup="false" ayarlar (yerel kasa güvenliği).
+ * 1. android:allowBackup="false" ayarlar.
  * 2. MainActivity'ye ACTION_SEND ve ACTION_SEND_MULTIPLE (image/*, video/*) intent-filter ekler.
- * 3. WhatsApp'tan paylaşılan content:// URI'lerini güvenle önbelleğe kopyalayıp JS'e ileten
- *    ShareIntentModule (Kotlin) dosyasını Android projesine ekler.
+ * 3. WhatsAppNotificationListener (NotificationListenerService) servisini Manifest'e ekler.
+ * 4. ShareIntentModule + NotificationBridge (Kotlin) dosyalarını Android projesine yazar.
  */
 function withWhatsAppShare(config) {
   // 1. AndroidManifest düzenlemesi
@@ -52,10 +52,37 @@ function withWhatsAppShare(config) {
       }
     }
 
+    // NotificationListenerService kaydı
+    application.service = application.service || [];
+    const hasNotifService = application.service.some(
+      (s) => s.$['android:name'] === '.WhatsAppNotificationListener'
+    );
+    if (!hasNotifService) {
+      application.service.push({
+        $: {
+          'android:name': '.WhatsAppNotificationListener',
+          'android:label': 'Özel Medya Kasası Bildirim Dinleyici',
+          'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
+          'android:exported': 'true',
+        },
+        'intent-filter': [
+          {
+            action: [
+              {
+                $: {
+                  'android:name': 'android.service.notification.NotificationListenerService',
+                },
+              },
+            ],
+          },
+        ],
+      });
+    }
+
     return config;
   });
 
-  // 2. Kotlin ShareIntentModule & Package dosyalarını oluştur
+  // 2. Kotlin Modülleri ve WhatsAppNotificationListener oluştur
   config = withDangerousMod(config, [
     'android',
     async (config) => {
@@ -69,11 +96,90 @@ function withWhatsAppShare(config) {
 
       fs.mkdirSync(targetDir, { recursive: true });
 
+      const listenerKt = `package ${packageName}
+
+import android.app.Notification
+import android.content.Context
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import org.json.JSONArray
+import org.json.JSONObject
+
+object NotificationEventStore {
+    private const val PREFS_NAME = "wa_vault_notif_prefs"
+    private const val KEY_EVENTS = "wa_notif_events"
+    private const val MAX_EVENTS = 80
+
+    @Synchronized
+    fun record(context: Context, senderName: String, text: String, timestamp: Long) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_EVENTS, "[]") ?: "[]"
+        val arr = try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+
+        val obj = JSONObject().apply {
+            put("senderName", senderName)
+            put("text", text)
+            put("timestamp", timestamp)
+        }
+        arr.put(obj)
+
+        // Yalnızca son MAX_EVENTS kaydını tut
+        val trimmed = JSONArray()
+        val start = maxOf(0, arr.length() - MAX_EVENTS)
+        for (i in start until arr.length()) {
+            trimmed.put(arr.get(i))
+        }
+        prefs.edit().putString(KEY_EVENTS, trimmed.toString()).apply()
+    }
+
+    @Synchronized
+    fun readAll(context: Context): JSONArray {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_EVENTS, "[]") ?: "[]"
+        return try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+    }
+
+    @Synchronized
+    fun clear(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_EVENTS, "[]").apply()
+    }
+}
+
+class WhatsAppNotificationListener : NotificationListenerService() {
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        if (sbn == null) return
+        val pkg = sbn.packageName ?: return
+        if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") return
+
+        val notification = sbn.notification ?: return
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
+
+        val extras = notification.extras ?: return
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: return
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
+
+        if (title.isEmpty() || title.equals("WhatsApp", ignoreCase = true)) return
+
+        val timestamp = if (sbn.postTime > 0) sbn.postTime else System.currentTimeMillis()
+        NotificationEventStore.record(applicationContext, title, text, timestamp)
+
+        val reactCtx = (application as? com.facebook.react.ReactApplication)
+            ?.reactHost?.currentReactContext as? com.facebook.react.bridge.ReactApplicationContext
+        ShareIntentModule.emitWhatsAppNotification(reactCtx)
+    }
+}
+`;
+
+      fs.writeFileSync(path.join(targetDir, 'WhatsAppNotificationListener.kt'), listenerKt, 'utf8');
+
       const moduleKt = `package ${packageName}
 
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.Settings
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.NativeModule
@@ -188,10 +294,85 @@ class ShareIntentModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    @ReactMethod
+    fun isNotificationAccessEnabled(promise: Promise) {
+        try {
+            val cn = ComponentName(reactContext, WhatsAppNotificationListener::class.java)
+            val flat = Settings.Secure.getString(
+                reactContext.contentResolver,
+                "enabled_notification_listeners"
+            ) ?: ""
+            val enabled = flat.contains(cn.flattenToString()) || flat.contains(reactContext.packageName)
+            promise.resolve(enabled)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun openNotificationAccessSettings(promise: Promise) {
+        try {
+            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            reactContext.startActivity(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("SETTINGS_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun openBatteryOptimizationSettings(promise: Promise) {
+        try {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            reactContext.startActivity(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("BATTERY_SETTINGS_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun getCapturedNotifications(promise: Promise) {
+        try {
+            val arr = NotificationEventStore.readAll(reactContext)
+            val result: WritableArray = Arguments.createArray()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val map = Arguments.createMap()
+                map.putString("senderName", obj.optString("senderName", ""))
+                map.putString("text", obj.optString("text", ""))
+                map.putDouble("timestamp", obj.optDouble("timestamp", 0.0))
+                result.pushMap(map)
+            }
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("NOTIF_READ_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun clearCapturedNotifications(promise: Promise) {
+        try {
+            NotificationEventStore.clear(reactContext)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("NOTIF_CLEAR_ERROR", e.message, e)
+        }
+    }
+
     companion object {
         fun emitNewShare(context: ReactApplicationContext?) {
             context?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 ?.emit("onSharedMediaReceived", null)
+        }
+
+        fun emitWhatsAppNotification(context: ReactApplicationContext?) {
+            context?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                ?.emit("onWhatsAppNotification", null)
         }
     }
 }
@@ -209,7 +390,6 @@ class ShareIntentPackage : ReactPackage {
 
       fs.writeFileSync(path.join(targetDir, 'ShareIntentModule.kt'), moduleKt, 'utf8');
 
-      // MainApplication.kt içine ShareIntentPackage ekle
       const mainAppPath = path.join(targetDir, 'MainApplication.kt');
       if (fs.existsSync(mainAppPath)) {
         let mainApp = fs.readFileSync(mainAppPath, 'utf8');

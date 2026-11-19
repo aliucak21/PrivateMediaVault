@@ -15,6 +15,10 @@ const DEFAULT_SETTINGS: VaultSettings = {
   encryptionEnabled: false,
   lastSelectedContactId: null,
   whatsappSafUri: null,
+  whatsappSafUris: [],
+  autoSyncEnabled: false,
+  autoDeleteOriginalOnSync: false,
+  lastSyncAt: null,
 };
 
 export async function loadSettings(): Promise<VaultSettings> {

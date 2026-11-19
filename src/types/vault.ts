@@ -37,6 +37,16 @@ export interface VaultSettings {
   encryptionEnabled: boolean;
   lastSelectedContactId: number | null;
   whatsappSafUri: string | null;
+  whatsappSafUris: string[];
+  autoSyncEnabled: boolean;
+  autoDeleteOriginalOnSync: boolean;
+  lastSyncAt: number | null;
+}
+
+export interface CapturedNotification {
+  senderName: string;
+  text: string;
+  timestamp: number;
 }
 
 export interface PendingImportItem {

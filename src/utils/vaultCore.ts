@@ -1,4 +1,10 @@
-import type { MediaType, SortOrder, VaultMedia } from '../types/vault';
+import type {
+  CapturedNotification,
+  Contact,
+  MediaType,
+  SortOrder,
+  VaultMedia,
+} from '../types/vault';
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.3gp', '.m4v'];
 const PHOTO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.gif'];
@@ -93,4 +99,61 @@ export function filterAndSortMedia(
 
 export function isDuplicateHash(existingHashes: Set<string>, sha256: string): boolean {
   return existingHashes.has(sha256);
+}
+
+export function normalizeSenderName(raw: string): string {
+  return raw
+    .replace(/\(\d+\s*(mesaj|messages?|yeni mesaj)\)/gi, '')
+    .trim()
+    .toLocaleLowerCase('tr-TR');
+}
+
+export function matchNotificationToContact(
+  senderName: string,
+  contacts: Contact[]
+): Contact | null {
+  const normalized = normalizeSenderName(senderName);
+  if (!normalized) return null;
+
+  for (const contact of contacts) {
+    const cNorm = contact.name.trim().toLocaleLowerCase('tr-TR');
+    if (cNorm === normalized) return contact;
+  }
+
+  for (const contact of contacts) {
+    const cNorm = contact.name.trim().toLocaleLowerCase('tr-TR');
+    if (normalized.includes(cNorm) || cNorm.includes(normalized)) {
+      return contact;
+    }
+  }
+  return null;
+}
+
+/**
+ * Dosya zaman damgasına en yakın (varsayılan ±90 saniye içinde) WhatsApp bildirimini bulur.
+ * Aynı pencerede birden fazla farklı gönderen varsa yalnızca en yakın zamanlı göndereni döndürür.
+ */
+export function findMatchingContactForMedia(
+  fileTimestamp: number,
+  notifications: CapturedNotification[],
+  contacts: Contact[],
+  windowMs = 90_000
+): Contact | null {
+  if (notifications.length === 0 || contacts.length === 0) return null;
+
+  let bestContact: Contact | null = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+
+  for (const notif of notifications) {
+    const delta = Math.abs(fileTimestamp - notif.timestamp);
+    if (delta > windowMs) continue;
+
+    const matched = matchNotificationToContact(notif.senderName, contacts);
+    if (matched && delta < bestDelta) {
+      bestDelta = delta;
+      bestContact = matched;
+    }
+  }
+
+  return bestContact;
 }
