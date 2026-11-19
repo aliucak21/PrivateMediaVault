@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Özel Medya Kasası",
+    "slug": "private-media-vault",
+    "owner": "aliucak",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.privatemediavault.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1220",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Özel Medya Kasası kilidini açmak için biyometrik doğrulama kullanılır."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Kasaya fotoğraf ve video eklemek için medya erişimi gereklidir."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Seçilen medyaları dışa aktarmak için galeri izni gereklidir.",
+          "savePhotosPermission": "Seçilen medyaları galeriye kaydetmek için izin gereklidir.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      "expo-sharing",
+      "expo-video",
+      "./plugins/withWhatsAppShare"
+    ]
+  }
+}

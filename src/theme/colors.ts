@@ -1,0 +1,16 @@
+export const VaultColors = {
+  bg: '#090D16',
+  surface: '#111827',
+  surfaceElevated: '#1A2334',
+  border: '#253147',
+  primary: '#10B981',
+  primarySoft: 'rgba(16, 185, 129, 0.14)',
+  accent: '#38BDF8',
+  danger: '#EF4444',
+  dangerSoft: 'rgba(239, 68, 68, 0.14)',
+  warning: '#F59E0B',
+  warningSoft: 'rgba(245, 158, 11, 0.14)',
+  text: '#F8FAFC',
+  textMuted: '#94A3B8',
+  textDim: '#64748B',
+};
