@@ -25,7 +25,8 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.ACCESS_MEDIA_LOCATION",
-        "android.permission.READ_MEDIA_AUDIO"
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_CONTACTS"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -54,6 +55,12 @@
       ],
       "expo-sharing",
       "expo-video",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Kasaya eklenecek kişileri telefon rehberinden seçmek için izin gereklidir."
+        }
+      ],
       "./plugins/withWhatsAppShare"
     ],
     "extra": {

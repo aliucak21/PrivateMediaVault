@@ -95,13 +95,13 @@ export interface AutoSyncReport {
 }
 
 /**
- * Yakalanan WhatsApp bildirimleri ile SAF klasöründeki yeni dosyaları eşleştirir.
- * Yalnızca takip edilen bir kişiyle eşleşen yeni dosyaları otomatik kasaya alır.
+ * Yakalanan WhatsApp bildirimleri ile SAF/dosya klasöründeki YENİ dosyaları sıkı zaman eşleştirmesiyle eşler.
+ * Eski dosyaları veya zaman damgası belirsiz dosyaları kesinlikle otomatik aktarmaz.
  */
 export async function syncWhatsAppWithNotifications(
   contacts: Contact[],
   safUris: string[],
-  options: { encrypt: boolean; deleteOriginals: boolean }
+  options: { encrypt: boolean; deleteOriginals: boolean; minTimestamp?: number }
 ): Promise<AutoSyncReport> {
   if (contacts.length === 0 || safUris.length === 0) {
     return { syncedCount: 0, deletedOriginalsCount: 0, matchedNames: [] };
@@ -117,9 +117,13 @@ export async function syncWhatsAppWithNotifications(
     existingMedia.map((m) => m.originalUri).filter((u): u is string => Boolean(u))
   );
 
-  // Son 15 dakika içinde takip edilen kişilerden gelen bildirim yoksa taramaya gerek yok
+  // Yalnızca son 10 dakika içinde takip edilen kişilerden gelen bildirimleri dikkate al
   const now = Date.now();
-  const recentNotifs = notifications.filter((n) => now - n.timestamp <= 15 * 60 * 1000);
+  const recentNotifs = notifications.filter(
+    (n) =>
+      now - n.timestamp <= 10 * 60 * 1000 &&
+      Boolean(matchNotificationToContact(n.senderName, contacts))
+  );
   if (recentNotifs.length === 0) {
     return { syncedCount: 0, deletedOriginalsCount: 0, matchedNames: [] };
   }
@@ -139,38 +143,34 @@ export async function syncWhatsAppWithNotifications(
     const newEntries = entries.filter((e) => !knownOriginalUris.has(e.uri));
     if (newEntries.length === 0) continue;
 
-    // En yeni dosyaları öne almak için son 25 yeni dosyayı kontrol et
-    const candidates = newEntries.slice(-25);
+    // En son 20 yeni dosyayı kontrol et
+    const candidates = newEntries.slice(-20);
 
     for (const item of candidates) {
-      let fileTimestamp = now;
+      let fileTimestamp: number | null = null;
       try {
         const info = await FileSystem.getInfoAsync(item.uri);
         if (info.exists && 'modificationTime' in info && typeof info.modificationTime === 'number') {
-          // modificationTime saniye cinsinden dönerse ms'ye çevir
           fileTimestamp =
             info.modificationTime < 1e12
               ? info.modificationTime * 1000
               : info.modificationTime;
         }
       } catch {
-        // Dosya zamanı alınamazsa güncel zaman üzerinden son bildirimle eşle
+        fileTimestamp = null;
       }
 
-      let targetContact = findMatchingContactForMedia(
+      // Dosya zamanı okunamıyorsa veya otomatik aktarım açılmadan önce oluşmuşsa atla
+      if (fileTimestamp === null) continue;
+      if (options.minTimestamp && fileTimestamp < options.minTimestamp) continue;
+
+      // Sıkı zaman penceresi: dosya, bildirimden en fazla 15 sn önce veya 45 sn sonra oluşmuş olmalı
+      const targetContact = findMatchingContactForMedia(
         fileTimestamp,
         recentNotifs,
         contacts,
-        120_000
+        45_000
       );
-
-      // Eğer tek bir kişi son 2 dakikada bildirim attıysa ve dosya zamanı belirsizse o kişiyi seç
-      if (!targetContact && recentNotifs.length > 0) {
-        const latest = recentNotifs[recentNotifs.length - 1];
-        if (now - latest.timestamp <= 120_000) {
-          targetContact = matchNotificationToContact(latest.senderName, contacts);
-        }
-      }
 
       if (!targetContact) continue;
 

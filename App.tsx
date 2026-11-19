@@ -76,6 +76,7 @@ import {
 import { LockScreen } from './src/components/LockScreen';
 import { MediaViewerModal } from './src/components/MediaViewerModal';
 import { ImportModal } from './src/components/ImportModal';
+import { ContactsPickerModal } from './src/components/ContactsPickerModal';
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -90,6 +91,7 @@ export default function App() {
     whatsappSafUris: [],
     autoSyncEnabled: false,
     autoDeleteOriginalOnSync: false,
+    autoSyncBaselineAt: null,
     lastSyncAt: null,
   });
   const [notifAccessOk, setNotifAccessOk] = useState(false);
@@ -113,6 +115,7 @@ export default function App() {
   const [viewerMedia, setViewerMedia] = useState<VaultMedia | null>(null);
   const [pendingImports, setPendingImports] = useState<PendingImportItem[]>([]);
   const [importModalVisible, setImportModalVisible] = useState(false);
+  const [contactsPickerVisible, setContactsPickerVisible] = useState(false);
   const [newPinDraft, setNewPinDraft] = useState('');
   const [bioHardwareOk, setBioHardwareOk] = useState(false);
 
@@ -181,6 +184,7 @@ export default function App() {
         const report = await syncWhatsAppWithNotifications(contacts, allSafUris, {
           encrypt: settings.encryptionEnabled,
           deleteOriginals: settings.autoDeleteOriginalOnSync,
+          minTimestamp: settings.autoSyncBaselineAt || undefined,
         });
         const next = await saveSettings({ lastSyncAt: Date.now() });
         setSettings(next);
@@ -207,6 +211,7 @@ export default function App() {
       settings.whatsappSafUri,
       settings.encryptionEnabled,
       settings.autoDeleteOriginalOnSync,
+      settings.autoSyncBaselineAt,
       contacts,
       refreshData,
     ]
@@ -666,6 +671,12 @@ export default function App() {
                   <TouchableOpacity style={styles.addContactBtn} onPress={handleAddContact}>
                     <Ionicons name="add" size={22} color="#052E16" />
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addContactBtn, { backgroundColor: VaultColors.accent }]}
+                    onPress={() => setContactsPickerVisible(true)}
+                  >
+                    <Ionicons name="book-outline" size={20} color="#082F49" />
+                  </TouchableOpacity>
                 </View>
 
                 <FlatList
@@ -794,7 +805,12 @@ export default function App() {
                     </View>
                     <Switch
                       value={settings.autoSyncEnabled}
-                      onValueChange={(v) => handleUpdateSetting({ autoSyncEnabled: v })}
+                      onValueChange={(v) =>
+                        handleUpdateSetting({
+                          autoSyncEnabled: v,
+                          autoSyncBaselineAt: v ? Date.now() : settings.autoSyncBaselineAt,
+                        })
+                      }
                     />
                   </View>
 
@@ -1032,6 +1048,16 @@ export default function App() {
             setPendingImports([]);
           }}
           onCompleted={refreshData}
+        />
+
+        <ContactsPickerModal
+          visible={contactsPickerVisible}
+          existingNames={contacts.map((c) => c.name)}
+          onSelectName={async (name) => {
+            await createContact(name);
+            await refreshData();
+          }}
+          onClose={() => setContactsPickerVisible(false)}
         />
       </SafeAreaView>
     </SafeAreaProvider>

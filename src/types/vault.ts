@@ -40,6 +40,7 @@ export interface VaultSettings {
   whatsappSafUris: string[];
   autoSyncEnabled: boolean;
   autoDeleteOriginalOnSync: boolean;
+  autoSyncBaselineAt: number | null;
   lastSyncAt: number | null;
 }
 

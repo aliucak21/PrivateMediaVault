@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS: VaultSettings = {
   whatsappSafUris: [],
   autoSyncEnabled: false,
   autoDeleteOriginalOnSync: false,
+  autoSyncBaselineAt: null,
   lastSyncAt: null,
 };
 
